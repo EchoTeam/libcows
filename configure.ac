@@ -1,0 +1,10 @@
+AC_INIT(libcows,0.1)
+
+AC_CONFIG_AUX_DIR(config)
+AM_INIT_AUTOMAKE([-Wall -Werror foreign])
+AC_CONFIG_FILES([Makefile])
+AC_PROG_CC
+AC_PROG_INSTALL
+AM_PROG_LIBTOOL
+AC_OUTPUT
+
