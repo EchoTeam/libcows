@@ -34,8 +34,8 @@
 #include <assert.h>
 
 #include "buffers.h"
-#include "base64.h"
 #include "sha-1.c"
+#include "libcows_base64.h"
 #include "libcows_common.h"
 #include "libcows_frame.h"
 
@@ -99,6 +99,7 @@ int libcows_set_outgoing_buffer_limit(libcows_ctx *ctx, int limit) {
 libcows_ctx *
 libcows_context_new(const char *sec_websocket_version, const char *sec_websocket_key, const char *more_http_headers, struct libcows_callbacks *callbacks, void *opaque_key) {
     char new_key[64];
+    char base64_output[32];
     size_t size, new_key_size;
     libcows_ctx *ctx;
     char *out_buf;
@@ -145,7 +146,8 @@ libcows_context_new(const char *sec_websocket_version, const char *sec_websocket
     assert(size == 4000);
 
     char sha1_buf[20];
-    size_t sha1_size = sizeof(sha1_buf);
+    SHA1((void *)new_key, new_key_size, (unsigned char *)sha1_buf);
+    size_t base64_output_size = sizeof(base64_output);
     size = snprintf(out_buf, size,
         "HTTP/1.1 101 Switching Protocols\r\n"
         "Upgrade: websocket\r\n"
@@ -153,7 +155,8 @@ libcows_context_new(const char *sec_websocket_version, const char *sec_websocket
         "Sec-WebSocket-Accept: %s\r\n"
         "%s"
         "\r\n",
-        base64_encode(SHA1((void *)new_key, new_key_size, (unsigned char *)sha1_buf), &sha1_size),
+        libcows_base64_encode(sha1_buf, sizeof(sha1_buf),
+            base64_output, &base64_output_size),
         more_http_headers
     );
     cbuf_chain_advance_write_ptr(ctx->out_state.outbuf, size);
@@ -169,11 +172,12 @@ libcows_context_new(const char *sec_websocket_version, const char *sec_websocket
     case LCERR_OK:
         ctx->state = LCTX_HEALTHY;
         return ctx;
-    case LCERR_QUOTA_EXCEEDED:
-        assert(!"Unreachable: Write() does not check quota");
     case LCERR_BROKEN_CONNECTION:
         libcows_context_free(ctx);
         return NULL;
+    case LCERR_QUOTA_EXCEEDED:
+    default:
+        assert(!"Unreachable: Write() does not check quota");
     }
 }
 
@@ -473,18 +477,29 @@ static libcows_send_error Write(libcows_ctx *ctx) {
  */
 static void libcows_unmask(void *data, size_t size, void *keyp) {
     libcows_unmask_key *key = keyp;
+    unsigned long mask;
     size_t i;
 
     /*
      * Optimized path.
      */
-    if(size >= sizeof(long)) {
-        unsigned long mask;
+    if(size >= sizeof(mask)) {
+
+        size_t left_unaligned_bytes = sizeof(mask)
+                            - ((uintptr_t)data & (sizeof(mask)-1));
+        if(left_unaligned_bytes < sizeof(mask)) {
+            for(i = 0; i < left_unaligned_bytes; i++)
+                ((unsigned char *)data)[i] ^= key->mask4[(i + key->state) % 4];
+            data += left_unaligned_bytes;
+            size -= left_unaligned_bytes;
+            key->state = (key->state + left_unaligned_bytes) % 4;
+        }
 
         /* Prepare a long mask. */
         for(i = 0; i < sizeof(mask); i++) {
             ((unsigned char *)&mask)[i] = key->mask4[(key->state + i) % 4];
         }
+        /* Prepare a long mask. */
 
         unsigned long *dlong = data;
         unsigned long *dlend = dlong + size/sizeof(mask);

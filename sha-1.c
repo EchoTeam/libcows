@@ -56,8 +56,6 @@ typedef unsigned __int64 u_int64_t;
 #endif
 #endif
 
-#define bzero(b, len) (memset((b), '\0', (len)), (void) 0)
-
 #else
 #include <sys/stat.h>
 #include <sys/cdefs.h>
@@ -65,6 +63,8 @@ typedef unsigned __int64 u_int64_t;
 #endif
 
 #include <string.h>
+
+#define bzero(b, len) (memset((b), '\0', (len)), (void) 0)
 
 struct sha1_ctxt {
 	union {
@@ -323,5 +323,29 @@ SHA1(const unsigned char *d, size_t n, unsigned char *md)
 
 	return md;
 }
+
+
+#ifdef  UNIT_TEST_SHA1
+#include <assert.h>
+int main() {
+    unsigned char md[20] = { };
+
+    /* Empty string SHA1 */
+    SHA1((const void *)"", 0, md);
+    assert(md[0] == 0xda);
+    assert(md[1] == 0x39);
+    assert(md[18] == 0x07);
+    assert(md[19] == 0x09);
+
+    /* Space SHA1 */
+    SHA1((const void *)" ", 1, md);
+    assert(md[0] == 0xb8);
+    assert(md[1] == 0x58);
+    assert(md[18] == 0x09);
+    assert(md[19] == 0xc6);
+
+    return 0;
+}
+#endif  /* UNIT_TEST_SHA1 */
 
 #endif /*unsupported*/
